@@ -241,6 +241,14 @@ def main():
     _db.init_db(_DB_PATH)
 
     if args.daemon:
+        # Skip if service already healthy on our port
+        try:
+            import urllib.request as _ur
+            _ur.urlopen(f"http://127.0.0.1:{_HTTP_PORT}/health", timeout=1).close()
+            print(f"Service already running on :{_HTTP_PORT}")
+            return
+        except Exception:
+            pass
         _daemonize()
 
     print(f"claude-activity-tracker service — HTTP on 127.0.0.1:{_HTTP_PORT}")

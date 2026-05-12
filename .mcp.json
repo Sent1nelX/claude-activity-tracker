@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "activity-tracker": {
+      "command": "python3",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/src/service.py", "--mcp"]
+    }
+  }
+}

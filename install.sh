@@ -59,6 +59,7 @@ _get() {
 _get "$PLUGIN_DIR/src/service.py"   "src/service.py"
 _get "$PLUGIN_DIR/src/server.py"    "src/server.py"
 _get "$PLUGIN_DIR/src/db.py"        "src/db.py"
+_get "$PLUGIN_DIR/src/dashboard.py" "src/dashboard.py"
 _get "$PLUGIN_DIR/hooks/session_start.sh"  "hooks/session_start.sh"
 _get "$PLUGIN_DIR/hooks/pre_tool_use.sh"   "hooks/pre_tool_use.sh"
 _get "$PLUGIN_DIR/hooks/post_tool_use.sh"  "hooks/post_tool_use.sh"
@@ -76,10 +77,10 @@ pip3 install mcp --break-system-packages -q 2>/dev/null \
 # ── 4. register MCP server with Claude Code ──────────────────────────────────
 info "Registering MCP server..."
 if command -v claude >/dev/null 2>&1; then
-  claude mcp remove activity-tracker 2>/dev/null || true
-  claude mcp add activity-tracker -- python3 "$PLUGIN_DIR/src/service.py" --mcp 2>/dev/null \
-    && ok "MCP server registered: activity-tracker" \
-    || warn "claude mcp add failed — run manually: claude mcp add activity-tracker -- python3 $PLUGIN_DIR/src/service.py --mcp"
+  claude mcp remove activity-tracker --scope user 2>/dev/null || true
+  claude mcp add --scope user activity-tracker -- python3 "$PLUGIN_DIR/src/service.py" --mcp 2>/dev/null \
+    && ok "MCP server registered: activity-tracker (user scope)" \
+    || warn "claude mcp add failed — run manually: claude mcp add --scope user activity-tracker -- python3 $PLUGIN_DIR/src/service.py --mcp"
 else
   warn "'claude' CLI not in PATH — skipping MCP registration. Run this after installing Claude Code:"
   warn "  claude mcp add activity-tracker -- python3 $PLUGIN_DIR/src/service.py --mcp"
