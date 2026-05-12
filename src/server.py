@@ -328,19 +328,38 @@ def tool_activity_plane(workspace_url: str = "", api_key: str = "") -> str:
             "3. Then call: activity_plane()"
         )
 
-    # Fetch current cycle/issues from Plane API
+    # Fetch projects then issues from Plane API
     import urllib.request, urllib.error, json as _json
+
+    def _plane_get(path: str) -> dict:
+        req = urllib.request.Request(
+            f"https://api.plane.so/api/v1{path}",
+            headers={"X-Api-Key": api_key, "Accept": "application/json",
+                     "User-Agent": "claude-activity-tracker/2.0"},
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            return _json.loads(resp.read())
+
     try:
         workspace_slug = workspace_url.rstrip("/").split("/")[-1]
-        url = f"https://api.plane.so/api/v1/workspaces/{workspace_slug}/issues/?per_page=10"
-        req = urllib.request.Request(url, headers={"X-Api-Key": api_key})
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            data = _json.loads(resp.read())
-        issues = data.get("results", [])
-        lines = [f"✈️  Plane — {workspace_slug}", f"Open issues: {data.get('total_count', len(issues))}", ""]
-        for issue in issues[:10]:
-            state = issue.get("state_detail", {}).get("name", "?")
-            lines.append(f"  [{state}] {issue.get('name', 'Untitled')}")
+        projects = _plane_get(f"/workspaces/{workspace_slug}/projects/")
+        project_list = projects.get("results", projects) if isinstance(projects, dict) else projects
+
+        lines = [f"✈️  Plane — {workspace_slug}", f"Projects: {len(project_list)}", ""]
+        for proj in project_list[:5]:
+            pid = proj.get("id", "")
+            pname = proj.get("name", "?")
+            try:
+                issues_data = _plane_get(f"/workspaces/{workspace_slug}/projects/{pid}/issues/?per_page=10")
+                issues = issues_data.get("results", [])
+                total = issues_data.get("total_count", len(issues))
+                lines.append(f"📁 {pname} ({total} issues)")
+                for issue in issues[:5]:
+                    state = issue.get("state_detail", {}).get("name", "—")
+                    lines.append(f"   [{state}] {issue.get('name', 'Untitled')}")
+                lines.append("")
+            except Exception:
+                lines.append(f"📁 {pname}")
         return "\n".join(lines)
     except Exception as e:
         return f"Plane API error: {e}\nCheck your workspace URL and API key."
