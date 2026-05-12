@@ -21,7 +21,7 @@ That's it. The installer will:
 - Start the background service automatically
 - Add auto-start to your shell profile
 
-Then **restart Claude Code** and type `/activity`.
+Then **restart Claude Code** and send a message like `show my activity` or `coding stats`.
 
 > **Requirements:** Python 3.8+, `curl`
 
@@ -60,41 +60,40 @@ cd claude-activity-tracker
 
 ## Usage
 
-### /activity command
+### Asking Claude for your stats
 
-Type `/activity` in any Claude Code session:
+Send a message to Claude in any Claude Code session. These all work:
 
 ```
+show my activity
+what did I work on today
+coding stats
 /activity
 ```
 
-Claude will fetch today's stats from the local MCP server and display a formatted report:
+> **Note:** `/activity` is not a built-in slash command — it won't appear in the autocomplete menu (like `/usage` or `/status`). It's a skill trigger word: type it as a regular message and Claude will invoke the skill.
+
+Claude will call the `activity_stats` MCP tool and display a formatted text report:
 
 ```
-📊 Today's Activity — 2026-05-12
+📊 Activity — last 1 day(s)
 
-| Metric       | Value    |
-|--------------|----------|
-| Sessions     | 3        |
-| Active time  | 94 min   |
-| Tool calls   | 47       |
-| Files edited | 12       |
+🖥️  Sessions      : 3
+🔧 Tool calls    : 47
+💬 Requests      : 12
+⏱️  Active time   : 94 min
 
-🔧 Top Tools
-| Tool    | Calls |
-|---------|-------|
-| Edit    | 18    |
-| Read    | 14    |
-| Bash    | 9     |
+🔝 Top tools:
+   Edit                           18x
+   Read                           14x
+   Bash                            9x
 
-📁 Top Files
-| File              | Edits |
-|-------------------|-------|
-| src/server.py     | 7     |
-| hooks/pre_tool.py | 4     |
+📁 Top files:
+   /home/user/project/src/server.py    7x
+   /home/user/project/hooks/pre_tool.py 4x
 ```
 
-For a weekly view: `/activity week`
+For a weekly report, ask: `activity report for 7 days` or call `activity_report` directly.
 
 ### Web Dashboard
 
