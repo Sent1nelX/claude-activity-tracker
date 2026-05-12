@@ -214,6 +214,62 @@ def get_current_session(session_id: str,
     }
 
 
+def get_patterns(days: int = 7, db_path: str | Path = DEFAULT_DB_PATH) -> dict:
+    """
+    Return usage patterns: hour-of-day, day-of-week, and task-type inference.
+    """
+    since = int(time.time()) - days * 86_400
+    conn = init_db(db_path)
+
+    hour_rows = conn.execute(
+        """SELECT CAST(strftime('%H', ts, 'unixepoch', 'localtime') AS INTEGER) AS hour,
+                  COUNT(*) AS cnt
+           FROM events WHERE ts >= ?
+           GROUP BY hour ORDER BY hour""",
+        (since,),
+    ).fetchall()
+
+    dow_rows = conn.execute(
+        """SELECT strftime('%w', ts, 'unixepoch', 'localtime') AS dow,
+                  COUNT(*) AS cnt
+           FROM events WHERE ts >= ?
+           GROUP BY dow ORDER BY dow""",
+        (since,),
+    ).fetchall()
+
+    tool_rows = conn.execute(
+        """SELECT tool_name, COUNT(*) AS cnt
+           FROM events WHERE ts >= ? AND tool_name != ''
+           GROUP BY tool_name""",
+        (since,),
+    ).fetchall()
+
+    tool_counts = {r["tool_name"]: r["cnt"] for r in tool_rows}
+    read  = tool_counts.get("Read", 0)
+    edit  = tool_counts.get("Edit", 0) + tool_counts.get("Write", 0)
+    bash  = tool_counts.get("Bash", 0)
+    web   = tool_counts.get("WebFetch", 0) + tool_counts.get("WebSearch", 0)
+    total = max(sum(tool_counts.values()), 1)
+
+    task_types = []
+    if (read + edit) / total > 0.5:
+        task_types.append("Code editing / refactoring")
+    if bash / total > 0.2:
+        task_types.append("Scripting / DevOps")
+    if web / total > 0.2:
+        task_types.append("Research / documentation")
+    if not task_types:
+        task_types.append("General AI assistance")
+
+    _DOW_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
+    return {
+        "by_hour": [{"hour": r["hour"], "count": r["cnt"]} for r in hour_rows],
+        "by_dow":  [{"day": _DOW_NAMES[int(r["dow"])], "count": r["cnt"]} for r in dow_rows],
+        "task_types": task_types,
+        "tool_counts": tool_counts,
+    }
+
+
 def get_recent_files(limit: int = 10,
                      db_path: str | Path = DEFAULT_DB_PATH) -> list[dict]:
     """Return recently edited files with edit counts, most recent first."""

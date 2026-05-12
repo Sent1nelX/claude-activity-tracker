@@ -147,6 +147,159 @@ def tool_activity_report(days: int = 7) -> str:
     return _fmt_report(stats_n, stats_1)
 
 
+def tool_activity_patterns(days: int = 7) -> str:
+    """Usage patterns: peak hours, days, task types inferred from tools."""
+    patterns = _db.get_patterns(days=days, db_path=DB_PATH)
+
+    lines = [f"🧠 Usage Patterns — last {days} day(s)", ""]
+
+    # Peak hours
+    by_hour = patterns["by_hour"]
+    if by_hour:
+        peak = max(by_hour, key=lambda x: x["count"])
+        lines.append(f"⏰ Peak hour: {peak['hour']:02d}:00  ({peak['count']} tool calls)")
+        # ASCII mini-chart
+        max_cnt = max(h["count"] for h in by_hour)
+        lines.append("")
+        lines.append("   Hour  Activity")
+        for h in by_hour:
+            bar = "█" * max(1, round(h["count"] / max_cnt * 20))
+            lines.append(f"   {h['hour']:02d}:00  {bar} {h['count']}")
+        lines.append("")
+
+    # Day of week
+    by_dow = patterns["by_dow"]
+    if by_dow:
+        peak_day = max(by_dow, key=lambda x: x["count"])
+        lines.append(f"📅 Most active day: {peak_day['day']}  ({peak_day['count']} tool calls)")
+        for d in by_dow:
+            bar = "█" * max(1, round(d["count"] / max(x["count"] for x in by_dow) * 15))
+            lines.append(f"   {d['day']}  {bar} {d['count']}")
+        lines.append("")
+
+    # Task type inference
+    lines.append("🎯 Primary task types detected:")
+    for t in patterns["task_types"]:
+        lines.append(f"   • {t}")
+
+    return "\n".join(lines)
+
+
+def tool_activity_github(project_path: str = ".", days: int = 7) -> str:
+    """Correlate Claude Code sessions with git commits in the project."""
+    import subprocess
+    lines = [f"🔗 GitHub Correlation — last {days} days", ""]
+
+    # Claude stats
+    stats = _db.get_stats(days=days, db_path=DB_PATH)
+    lines.append(f"Claude Code activity:")
+    lines.append(f"  Sessions   : {stats['total_sessions']}")
+    lines.append(f"  Tool calls : {stats['total_tools']}")
+    lines.append(f"  Active time: {stats['active_time_minutes']} min")
+    lines.append("")
+
+    # Git commits
+    try:
+        result = subprocess.run(
+            ["git", "-C", project_path, "log",
+             f"--since={days} days ago", "--oneline"],
+            capture_output=True, text=True, timeout=10
+        )
+        commits = [l for l in result.stdout.strip().splitlines() if l]
+        commit_count = len(commits)
+
+        result2 = subprocess.run(
+            ["git", "-C", project_path, "log",
+             f"--since={days} days ago",
+             "--pretty=format:", "--numstat"],
+            capture_output=True, text=True, timeout=10
+        )
+        lines_added = lines_removed = 0
+        for line in result2.stdout.splitlines():
+            parts = line.split("\t")
+            if len(parts) == 3:
+                try:
+                    lines_added += int(parts[0])
+                    lines_removed += int(parts[1])
+                except ValueError:
+                    pass
+
+        lines.append(f"Git activity (in {project_path}):")
+        lines.append(f"  Commits    : {commit_count}")
+        lines.append(f"  Lines added: +{lines_added}")
+        lines.append(f"  Lines removed: -{lines_removed}")
+        lines.append("")
+
+        if stats["total_sessions"] > 0 and commit_count > 0:
+            ratio = round(commit_count / stats["total_sessions"], 2)
+            lines.append(f"📊 Efficiency ratio: {ratio} commits per AI session")
+            if ratio > 1:
+                lines.append("   ✅ High code output relative to AI usage")
+            elif ratio > 0.3:
+                lines.append("   📈 Moderate output — typical for complex tasks")
+            else:
+                lines.append("   🔍 Low commit ratio — exploration/research phase?")
+        elif commit_count == 0:
+            lines.append("ℹ️  No commits found in this period.")
+        else:
+            lines.append("ℹ️  No Claude sessions recorded yet.")
+
+        if commits:
+            lines.append("")
+            lines.append("Recent commits:")
+            for c in commits[:5]:
+                lines.append(f"  • {c}")
+
+    except FileNotFoundError:
+        lines.append("⚠️  git not found in PATH.")
+    except subprocess.TimeoutExpired:
+        lines.append("⚠️  git command timed out.")
+    except Exception as e:
+        lines.append(f"⚠️  Could not read git log: {e}")
+
+    return "\n".join(lines)
+
+
+def tool_activity_export(webhook_url: str = "", days: int = 7) -> str:
+    """Export activity data as JSON, optionally POST to a webhook URL."""
+    import json as _json
+
+    stats = _db.get_stats(days=days, db_path=DB_PATH)
+    patterns = _db.get_patterns(days=days, db_path=DB_PATH)
+    files = _db.get_recent_files(limit=20, db_path=DB_PATH)
+
+    payload = {
+        "source": "claude-activity-tracker",
+        "exported_at": int(time.time()),
+        "period_days": days,
+        "stats": stats,
+        "patterns": {
+            "task_types": patterns["task_types"],
+            "peak_hour": max(patterns["by_hour"], key=lambda x: x["count"])["hour"] if patterns["by_hour"] else None,
+            "peak_day": max(patterns["by_dow"], key=lambda x: x["count"])["day"] if patterns["by_dow"] else None,
+        },
+        "top_files": files[:10],
+    }
+
+    if webhook_url:
+        import urllib.request
+        import urllib.error
+        body = _json.dumps(payload).encode()
+        req = urllib.request.Request(
+            webhook_url,
+            data=body,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                return f"✅ Data exported to {webhook_url}\nHTTP {resp.status}\n\nPayload:\n{_json.dumps(payload, indent=2)}"
+        except urllib.error.URLError as e:
+            return f"❌ Export failed: {e}\n\nPayload (not sent):\n{_json.dumps(payload, indent=2)}"
+    else:
+        return f"📤 Export payload (add webhook_url to POST):\n\n{_json.dumps(payload, indent=2)}"
+
+
 # ---------------------------------------------------------------------------
 # MCP server — try FastMCP first, fall back to minimal stdio JSON-RPC
 # ---------------------------------------------------------------------------
@@ -193,13 +346,54 @@ TOOLS_SCHEMA = [
             },
         },
     },
+    {
+        "name": "activity_patterns",
+        "description": "Analyse usage patterns: peak hours, days, inferred task types.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "days": {"type": "integer", "description": "Window in days (default 7)", "default": 7}
+            },
+        },
+    },
+    {
+        "name": "activity_github",
+        "description": "Correlate Claude Code sessions with git commits — AI sessions vs code output ratio.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "project_path": {"type": "string", "description": "Path to git repo (default '.')", "default": "."},
+                "days": {"type": "integer", "description": "Window in days (default 7)", "default": 7}
+            },
+        },
+    },
+    {
+        "name": "activity_export",
+        "description": "Export activity data as JSON or POST to a webhook URL (Plane, custom tracker, etc).",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "webhook_url": {"type": "string", "description": "URL to POST data to (optional)"},
+                "days": {"type": "integer", "description": "Window in days (default 7)", "default": 7}
+            },
+        },
+    },
 ]
 
 _TOOL_DISPATCH = {
-    "activity_stats": lambda args: tool_activity_stats(days=int(args.get("days", 1))),
-    "activity_session": lambda args: tool_activity_session(session_id=args["session_id"]),
-    "activity_files": lambda args: tool_activity_files(limit=int(args.get("limit", 10))),
-    "activity_report": lambda args: tool_activity_report(days=int(args.get("days", 7))),
+    "activity_stats":    lambda args: tool_activity_stats(days=int(args.get("days", 1))),
+    "activity_session":  lambda args: tool_activity_session(session_id=args["session_id"]),
+    "activity_files":    lambda args: tool_activity_files(limit=int(args.get("limit", 10))),
+    "activity_report":   lambda args: tool_activity_report(days=int(args.get("days", 7))),
+    "activity_patterns": lambda args: tool_activity_patterns(days=int(args.get("days", 7))),
+    "activity_github":   lambda args: tool_activity_github(
+        project_path=args.get("project_path", "."),
+        days=int(args.get("days", 7)),
+    ),
+    "activity_export":   lambda args: tool_activity_export(
+        webhook_url=args.get("webhook_url", ""),
+        days=int(args.get("days", 7)),
+    ),
 }
 
 
@@ -231,6 +425,21 @@ def _try_fastmcp() -> bool:
     def activity_report(days: int = 7) -> str:
         """Weekly activity summary with trends."""
         return tool_activity_report(days=days)
+
+    @mcp.tool()
+    def activity_patterns(days: int = 7) -> str:
+        """Analyse usage patterns: peak hours, days, inferred task types."""
+        return tool_activity_patterns(days=days)
+
+    @mcp.tool()
+    def activity_github(project_path: str = ".", days: int = 7) -> str:
+        """Correlate Claude Code sessions with git commits."""
+        return tool_activity_github(project_path=project_path, days=days)
+
+    @mcp.tool()
+    def activity_export(webhook_url: str = "", days: int = 7) -> str:
+        """Export activity data as JSON or POST to a webhook URL."""
+        return tool_activity_export(webhook_url=webhook_url, days=days)
 
     mcp.run()
     return True  # unreachable after mcp.run() blocks, but satisfies type checker

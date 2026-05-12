@@ -98,6 +98,20 @@ def main() -> None:
                 project=project,
                 db_path=_DB_PATH,
             )
+            # Detect new user request: if >30s since last tool call, count as new turn
+            _last_file = _ACTIVITY_DIR / "last_tool_ts"
+            try:
+                last_ts = int(_last_file.read_text().strip())
+            except Exception:
+                last_ts = 0
+            if ts - last_ts > 30:
+                _db.log_event(
+                    session_id=session_id,
+                    ts=ts,
+                    event_type="UserTurn",
+                    db_path=_DB_PATH,
+                )
+            _last_file.write_text(str(ts))
     except Exception:
         pass
 
