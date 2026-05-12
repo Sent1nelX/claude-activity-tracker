@@ -105,16 +105,16 @@ if os.path.exists(sf):
 hooks = settings.setdefault("hooks", {})
 
 def set_hook(event, cmd):
-    entry = {"command": cmd}
+    entry = {"matcher": "", "hooks": [{"type": "command", "command": cmd}]}
     existing = hooks.get(event, [])
     # replace any previous activity-tracker hook for this event
     cleaned = [e for e in existing if "claude-activity" not in json.dumps(e)]
     cleaned.append(entry)
     hooks[event] = cleaned
 
-set_hook("SessionStart", ["bash", f"{hdir}/session_start.sh"])
-set_hook("PreToolUse",   ["bash", f"{hdir}/pre_tool_use.sh"])
-set_hook("Stop",         ["bash", f"{hdir}/session_end.sh"])
+set_hook("SessionStart", f"bash {hdir}/session_start.sh")
+set_hook("PreToolUse",   f"bash {hdir}/pre_tool_use.sh")
+set_hook("Stop",         f"bash {hdir}/session_end.sh")
 
 with open(sf, "w") as f:
     json.dump(settings, f, indent=2)
