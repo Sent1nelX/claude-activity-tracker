@@ -4,7 +4,9 @@
 ![License: MIT](https://img.shields.io/badge/license-MIT-green)
 ![Claude Code](https://img.shields.io/badge/Claude%20Code-plugin-orange?logo=anthropic&logoColor=white)
 
-A lightweight, privacy-respecting plugin for [Claude Code](https://claude.ai/code) that automatically tracks your AI-assisted development activity — sessions, tool calls, files edited, and time spent — and surfaces it through a simple `/activity` command. All data stays on your machine, in a local SQLite database.
+A lightweight, privacy-respecting plugin for [Claude Code](https://claude.ai/code) that automatically tracks your AI-assisted development activity — sessions, tool calls, files edited, and time spent. All data stays on your machine in a local SQLite database.
+
+![Dashboard](docs/images/dashboard.png)
 
 ---
 
@@ -13,6 +15,8 @@ A lightweight, privacy-respecting plugin for [Claude Code](https://claude.ai/cod
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Sent1nelX/claude-activity-tracker/main/install.sh | bash
 ```
+
+![Install](docs/images/install.png)
 
 That's it. The installer will:
 - Download all plugin files to `~/.claude-activity/`
@@ -92,6 +96,8 @@ Claude will call the `activity_stats` MCP tool and display a formatted text repo
    /home/user/project/src/server.py    7x
    /home/user/project/hooks/pre_tool.py 4x
 ```
+
+![Stats](docs/images/stats.png)
 
 For a weekly report, ask: `activity report for 7 days` or call `activity_report` directly.
 
