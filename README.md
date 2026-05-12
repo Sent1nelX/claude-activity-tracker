@@ -32,10 +32,11 @@ Then **restart Claude Code** and type `/activity`.
 - **Automatic session tracking** — hooks into Claude Code start/stop events, no manual logging
 - **Tool usage analytics** — see which MCP tools and Claude Code built-ins you reach for most
 - **File edit heatmap** — discover which files you iterate on most across sessions
-- **GitHub correlation** — compare AI sessions against actual git commits
+- **Web dashboard** — dark-themed HTML dashboard with Chart.js charts at `http://127.0.0.1:8765/dashboard`
+- **GitHub correlation** — compare AI sessions against actual git commits (efficiency ratio)
 - **VSCode correlation** — see which projects are active in both Claude Code and VSCode simultaneously
 - **Plane integration** — fetch open issues from your Plane workspace alongside session data
-- **Peak hour analysis** — discover when you're most productive
+- **Peak hour analysis** — discover when you're most productive with hourly heatmap
 - **Daily & weekly reports** — instant summaries via the `/activity` skill command
 - **MCP-native** — exposes metrics through a local MCP server so Claude can reason about your data
 - **Zero cloud dependency** — SQLite on disk, nothing transmitted anywhere
@@ -95,6 +96,19 @@ Claude will fetch today's stats from the local MCP server and display a formatte
 
 For a weekly view: `/activity week`
 
+### Web Dashboard
+
+Open your browser at `http://127.0.0.1:8765/dashboard` while the service is running. You'll see a dark-themed dashboard with:
+
+- **Stat cards** — sessions, tool calls, requests, active time (today)
+- **Daily activity chart** — 7-day bar chart (sessions / tools / requests)
+- **Top tools doughnut** — which tools you use most
+- **Hourly heatmap** — line chart showing your peak hours across 24h
+- **Task type tags** — inferred categories (editing, reading, testing, …)
+- **Recent files table** — most-edited files with edit counts
+
+No extra setup needed — the `/dashboard` endpoint is served by the same daemon that receives hook events.
+
 ### MCP Tools
 
 The plugin registers an `activity-tracker` MCP server with tools you can call directly or reference in prompts:
@@ -119,17 +133,18 @@ The plugin registers an `activity-tracker` MCP server with tools you can call di
 Claude Code session
        │
        ├── SessionStart hook ─── hooks/session_start.sh ─┐
-       │                                                   │  HTTP POST
+       │                                                   │  HTTP POST /event
        ├── PreToolUse hook ───── hooks/pre_tool_use.sh ───► 127.0.0.1:8765
        │                                                   │  (service.py daemon)
        └── Stop hook ─────────── hooks/session_end.sh  ───┘
                                                            │
                                                     SQLite (~/.claude-activity/activity.db)
-                                                           │
-                                              service.py --mcp (stdio)
-                                                           │
-                                                     Claude Code
-                                              (activity_stats, activity_github, …)
+                                                        │          │
+                                           service.py --mcp    GET /dashboard
+                                           (stdio server)       (browser)
+                                                  │
+                                            Claude Code
+                                    (activity_stats, activity_github, …)
 ```
 
 A single unified daemon (`service.py`) runs two servers in one process:
@@ -200,7 +215,7 @@ cfg = {
 
 - [x] **VSCode correlation** — detect shared projects across Claude Code and VSCode sessions
 - [x] **Plane integration** — link sessions to Plane issues and sprints
-- [ ] **Web dashboard** — local FastAPI + React view with charts
+- [x] **Web dashboard** — dark-themed HTML dashboard with Chart.js at `http://127.0.0.1:8765/dashboard`
 - [ ] **Team aggregation** — opt-in anonymized team stats
 - [ ] **Goal tracking** — daily coding time targets with progress bars
 
