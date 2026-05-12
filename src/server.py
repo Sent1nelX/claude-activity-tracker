@@ -354,7 +354,7 @@ def tool_activity_plane(workspace_url: str = "", api_key: str = "") -> str:
                 issues = issues_data.get("results", [])
                 total = issues_data.get("total_count", len(issues))
                 lines.append(f"📁 {pname} ({total} issues)")
-                for issue in issues[:5]:
+                for issue in issues[:10]:
                     state = issue.get("state_detail", {}).get("name", "—")
                     lines.append(f"   [{state}] {issue.get('name', 'Untitled')}")
                 lines.append("")

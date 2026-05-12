@@ -24,10 +24,10 @@ warn()    { echo -e "${YELLOW}[warn]${RESET}  $*"; }
 die()     { echo -e "${RED}[error]${RESET} $*" >&2; exit 1; }
 
 echo -e "${BOLD}"
-echo "  ╔═══════════════════════════════════════════╗"
-echo "  ║   Claude Code Activity Tracker            ║"
-echo "  ║   $REPO  ║"
-echo "  ╚═══════════════════════════════════════════╝"
+echo "  ╔═══════════════════════════════════════════════════════════╗"
+echo "  ║   Claude Code Activity Tracker                            ║"
+echo "  ║   $REPO    ║"
+echo "  ╚═══════════════════════════════════════════════════════════╝"
 echo -e "${RESET}"
 
 # ── 1. check prerequisites ───────────────────────────────────────────────────
