@@ -1,171 +1,179 @@
 #!/usr/bin/env bash
+# Claude Code Activity Tracker — one-command installer
+#
+# Quick install (no git clone needed):
+#   curl -fsSL https://raw.githubusercontent.com/Sent1nelX/claude-activity-tracker/main/install.sh | bash
+#
+# Or from a local clone:
+#   ./install.sh
 set -euo pipefail
 
-# ============================================================
-# Claude Code Activity Tracker — Installer
-# https://github.com/Sent1nelX/claude-activity-tracker
-# ============================================================
-
+REPO="https://github.com/Sent1nelX/claude-activity-tracker"
+RAW="https://raw.githubusercontent.com/Sent1nelX/claude-activity-tracker/main"
 PLUGIN_DIR="$HOME/.claude-activity"
 SETTINGS_FILE="$HOME/.claude/settings.json"
 SKILLS_DIR="$HOME/.claude/skills"
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PORT="${ACTIVITY_PORT:-8765}"
 
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-CYAN='\033[0;36m'
-BOLD='\033[1m'
-RESET='\033[0m'
-
+# ── colours ──────────────────────────────────────────────────────────────────
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
+CYAN='\033[0;36m'; BOLD='\033[1m'; RESET='\033[0m'
 info()    { echo -e "${CYAN}[info]${RESET}  $*"; }
-success() { echo -e "${GREEN}[ok]${RESET}    $*"; }
+ok()      { echo -e "${GREEN}[ok]${RESET}    $*"; }
 warn()    { echo -e "${YELLOW}[warn]${RESET}  $*"; }
-error()   { echo -e "${RED}[error]${RESET} $*" >&2; exit 1; }
+die()     { echo -e "${RED}[error]${RESET} $*" >&2; exit 1; }
 
 echo -e "${BOLD}"
-echo "  ╔══════════════════════════════════════════╗"
-echo "  ║   Claude Code Activity Tracker           ║"
-echo "  ║   github.com/Sent1nelX/claude-activity-tracker ║"
-echo "  ╚══════════════════════════════════════════╝"
+echo "  ╔═══════════════════════════════════════════╗"
+echo "  ║   Claude Code Activity Tracker            ║"
+echo "  ║   $REPO  ║"
+echo "  ╚═══════════════════════════════════════════╝"
 echo -e "${RESET}"
 
-# ── 1. Prerequisites ────────────────────────────────────────
+# ── 1. check prerequisites ───────────────────────────────────────────────────
 info "Checking prerequisites..."
+command -v python3 >/dev/null 2>&1 || die "python3 not found. Install it first."
+command -v curl    >/dev/null 2>&1 || die "curl not found. Install it first."
+PY_OK=$(python3 -c "import sys; print(sys.version_info[:2] >= (3, 8))")
+[ "$PY_OK" = "True" ] || die "Python 3.8+ required (found $(python3 --version))."
+ok "Prerequisites OK"
 
-command -v python3 >/dev/null 2>&1 || error "python3 is required but not found."
-command -v claude  >/dev/null 2>&1 || error "'claude' CLI is required. Install Claude Code first."
+# ── 2. download files ────────────────────────────────────────────────────────
+info "Downloading plugin files..."
+mkdir -p "$PLUGIN_DIR/src" "$PLUGIN_DIR/hooks"
 
-PYTHON_VER=$(python3 -c "import sys; print(sys.version_info[:2] >= (3, 8))")
-[ "$PYTHON_VER" = "True" ] || error "Python 3.8+ required."
+# Determine source: local clone or remote GitHub
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-install.sh}")" 2>/dev/null && pwd || echo "")"
+USE_LOCAL=false
+[ -f "$SCRIPT_DIR/src/service.py" ] && USE_LOCAL=true
 
-success "Prerequisites OK"
+_get() {
+  local dest="$1" src_path="$2"
+  if $USE_LOCAL; then
+    cp "$SCRIPT_DIR/$src_path" "$dest"
+  else
+    curl -fsSL "$RAW/$src_path" -o "$dest"
+  fi
+}
 
-# ── 2. Create plugin directory ───────────────────────────────
-info "Creating plugin directory at $PLUGIN_DIR ..."
-mkdir -p "$PLUGIN_DIR/hooks" "$PLUGIN_DIR/src"
+_get "$PLUGIN_DIR/src/service.py"   "src/service.py"
+_get "$PLUGIN_DIR/src/server.py"    "src/server.py"
+_get "$PLUGIN_DIR/src/db.py"        "src/db.py"
+_get "$PLUGIN_DIR/hooks/session_start.sh"  "hooks/session_start.sh"
+_get "$PLUGIN_DIR/hooks/pre_tool_use.sh"   "hooks/pre_tool_use.sh"
+_get "$PLUGIN_DIR/hooks/session_end.sh"    "hooks/session_end.sh"
 
-# ── 3. Copy files ────────────────────────────────────────────
-info "Copying plugin files..."
+chmod +x "$PLUGIN_DIR/hooks/"*.sh
+ok "Files downloaded to $PLUGIN_DIR"
 
-if [ -d "$SCRIPT_DIR/hooks" ]; then
-    cp -r "$SCRIPT_DIR/hooks/." "$PLUGIN_DIR/hooks/"
-    success "Copied hooks/"
+# ── 3. install MCP deps (optional — server works without mcp package) ────────
+info "Installing mcp package (optional)..."
+pip3 install mcp --break-system-packages -q 2>/dev/null \
+  || pip3 install mcp -q 2>/dev/null \
+  || warn "Could not install mcp via pip — built-in JSON-RPC server will be used instead."
+
+# ── 4. register MCP server with Claude Code ──────────────────────────────────
+info "Registering MCP server..."
+if command -v claude >/dev/null 2>&1; then
+  claude mcp remove activity-tracker 2>/dev/null || true
+  claude mcp add activity-tracker -- python3 "$PLUGIN_DIR/src/service.py" --mcp 2>/dev/null \
+    && ok "MCP server registered: activity-tracker" \
+    || warn "claude mcp add failed — run manually: claude mcp add activity-tracker -- python3 $PLUGIN_DIR/src/service.py --mcp"
 else
-    warn "hooks/ directory not found in $SCRIPT_DIR — skipping"
+  warn "'claude' CLI not in PATH — skipping MCP registration. Run this after installing Claude Code:"
+  warn "  claude mcp add activity-tracker -- python3 $PLUGIN_DIR/src/service.py --mcp"
 fi
 
-if [ -d "$SCRIPT_DIR/src" ]; then
-    cp -r "$SCRIPT_DIR/src/." "$PLUGIN_DIR/src/"
-    success "Copied src/"
-else
-    warn "src/ directory not found in $SCRIPT_DIR — skipping"
-fi
-
-# ── 4. Make hook scripts executable ─────────────────────────
-info "Setting executable permissions on hook scripts..."
-find "$PLUGIN_DIR/hooks" -name "*.py" -exec chmod +x {} \;
-success "Hook scripts are executable"
-
-# ── 5. Install Python dependencies ──────────────────────────
-info "Installing Python dependencies (mcp)..."
-
-if pip3 install mcp --break-system-packages --quiet 2>/dev/null; then
-    success "mcp installed (--break-system-packages)"
-elif pip3 install mcp --quiet 2>/dev/null; then
-    success "mcp installed"
-else
-    warn "pip3 install failed. Trying pip..."
-    if pip install mcp --break-system-packages --quiet 2>/dev/null || pip install mcp --quiet 2>/dev/null; then
-        success "mcp installed via pip"
-    else
-        warn "Could not install mcp automatically. Run: pip3 install mcp"
-    fi
-fi
-
-# ── 6. Register MCP server ───────────────────────────────────
-info "Registering MCP server with Claude Code..."
-if claude mcp add activity-tracker -- python3 "$PLUGIN_DIR/src/server.py" 2>/dev/null; then
-    success "MCP server registered: activity-tracker"
-else
-    warn "MCP server may already be registered, or 'claude mcp add' failed."
-    warn "If needed, run manually:"
-    warn "  claude mcp add activity-tracker -- python3 $PLUGIN_DIR/src/server.py"
-fi
-
-# ── 7. Update settings.json ──────────────────────────────────
-info "Updating Claude Code settings.json ..."
-
+# ── 5. update Claude Code settings.json (hooks) ──────────────────────────────
+info "Configuring hooks in settings.json..."
 mkdir -p "$(dirname "$SETTINGS_FILE")"
 
 python3 - <<PYEOF
-import json, os, sys
+import json, os
 
-settings_file = os.path.expanduser("~/.claude/settings.json")
-plugin_dir    = os.path.expanduser("~/.claude-activity")
+sf   = os.path.expanduser("~/.claude/settings.json")
+hdir = os.path.expanduser("~/.claude-activity/hooks")
 
-# Load existing settings (or start fresh)
-if os.path.exists(settings_file):
+settings = {}
+if os.path.exists(sf):
     try:
-        with open(settings_file, "r") as f:
+        with open(sf) as f:
             settings = json.load(f)
-    except json.JSONDecodeError:
-        print("[warn]  settings.json was not valid JSON — creating a fresh one")
-        settings = {}
-else:
-    settings = {}
+    except Exception:
+        pass
 
 hooks = settings.setdefault("hooks", {})
 
-def ensure_hook(event, command):
-    """Add command to hook list if not already present."""
+def set_hook(event, cmd):
+    entry = {"command": cmd}
     existing = hooks.get(event, [])
-    # Hooks can be stored as a list of commands or a list of hook objects
-    cmd_str = json.dumps(command)
-    for entry in existing:
-        if isinstance(entry, dict) and json.dumps(entry.get("command")) == cmd_str:
-            return  # already registered
-        if isinstance(entry, list) and json.dumps(entry) == cmd_str:
-            return  # already registered
-    existing.append({"command": command})
-    hooks[event] = existing
+    # replace any previous activity-tracker hook for this event
+    cleaned = [e for e in existing if "claude-activity" not in json.dumps(e)]
+    cleaned.append(entry)
+    hooks[event] = cleaned
 
-ensure_hook("SessionStart", ["python3", f"{plugin_dir}/hooks/session_start.py"])
-ensure_hook("PreToolUse",   ["python3", f"{plugin_dir}/hooks/pre_tool_use.py"])
-ensure_hook("Stop",         ["python3", f"{plugin_dir}/hooks/session_end.py"])
+set_hook("SessionStart", ["bash", f"{hdir}/session_start.sh"])
+set_hook("PreToolUse",   ["bash", f"{hdir}/pre_tool_use.sh"])
+set_hook("Stop",         ["bash", f"{hdir}/session_end.sh"])
 
-with open(settings_file, "w") as f:
+with open(sf, "w") as f:
     json.dump(settings, f, indent=2)
-
-print(f"[ok]    settings.json updated: {settings_file}")
+print(f"  settings.json updated")
 PYEOF
+ok "Hooks configured"
 
-# ── 8. Install skill file ────────────────────────────────────
-info "Installing skill file..."
-
+# ── 6. install /activity skill ────────────────────────────────────────────────
 mkdir -p "$SKILLS_DIR"
+if $USE_LOCAL && [ -f "$SCRIPT_DIR/skills/activity.md" ]; then
+  cp "$SCRIPT_DIR/skills/activity.md" "$SKILLS_DIR/activity.md"
+elif ! $USE_LOCAL; then
+  curl -fsSL "$RAW/skills/activity.md" -o "$SKILLS_DIR/activity.md" 2>/dev/null || true
+fi
+[ -f "$SKILLS_DIR/activity.md" ] && ok "Skill /activity installed" || warn "Skill not installed"
 
-if [ -f "$SCRIPT_DIR/skills/activity.md" ]; then
-    cp "$SCRIPT_DIR/skills/activity.md" "$SKILLS_DIR/activity.md"
-    success "Skill installed: $SKILLS_DIR/activity.md"
+# ── 7. start the background service ──────────────────────────────────────────
+info "Starting background service on port $PORT..."
+pkill -f "service.py" 2>/dev/null || true
+sleep 0.3
+ACTIVITY_PORT=$PORT python3 "$PLUGIN_DIR/src/service.py" --daemon
+sleep 0.8
+
+if curl -sf "http://127.0.0.1:$PORT/health" >/dev/null 2>&1; then
+  ok "Service running on http://127.0.0.1:$PORT"
 else
-    warn "skills/activity.md not found — skipping skill installation"
+  warn "Service did not start — run manually: python3 $PLUGIN_DIR/src/service.py --daemon"
 fi
 
-# ── Done ─────────────────────────────────────────────────────
+# ── 8. auto-start on shell login ─────────────────────────────────────────────
+AUTOSTART_LINE="python3 \$HOME/.claude-activity/src/service.py --daemon 2>/dev/null &"
+for RC in "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.profile"; do
+  if [ -f "$RC" ] && ! grep -q "claude-activity" "$RC" 2>/dev/null; then
+    echo "" >> "$RC"
+    echo "# claude-activity-tracker — auto-start" >> "$RC"
+    echo "$AUTOSTART_LINE" >> "$RC"
+    ok "Auto-start added to $RC"
+    break
+  fi
+done
+
+# ── done ─────────────────────────────────────────────────────────────────────
 echo ""
-echo -e "${GREEN}${BOLD}  Installation complete!${RESET}"
+echo -e "${GREEN}${BOLD}  ✅ Installation complete!${RESET}"
 echo ""
-echo -e "  ${BOLD}Usage:${RESET}"
-echo -e "    Type ${CYAN}/activity${RESET} in any Claude Code session to see your stats"
+echo -e "  ${BOLD}Quick start:${RESET}"
+echo -e "    Restart Claude Code, then type ${CYAN}/activity${RESET}"
 echo ""
-echo -e "  ${BOLD}Available MCP tools:${RESET}"
-echo -e "    ${CYAN}activity_stats${RESET}   — today's session summary"
-echo -e "    ${CYAN}activity_report${RESET}  — weekly activity report"
-echo -e "    ${CYAN}activity_tools${RESET}   — most-used tools breakdown"
-echo -e "    ${CYAN}activity_files${RESET}   — most-edited files"
+echo -e "  ${BOLD}MCP tools available:${RESET}"
+echo -e "    ${CYAN}activity_stats${RESET}    — today's summary"
+echo -e "    ${CYAN}activity_patterns${RESET} — peak hours & task types"
+echo -e "    ${CYAN}activity_github${RESET}   — AI sessions vs git commits"
+echo -e "    ${CYAN}activity_report${RESET}   — weekly report"
+echo -e "    ${CYAN}activity_export${RESET}   — JSON/webhook export"
 echo ""
-echo -e "  ${BOLD}Data location:${RESET} $PLUGIN_DIR/activity.db"
+echo -e "  ${BOLD}Service management:${RESET}"
+echo -e "    python3 ~/.claude-activity/src/service.py --status"
+echo -e "    python3 ~/.claude-activity/src/service.py --stop"
 echo ""
-echo -e "  Restart Claude Code for hooks to take effect."
+echo -e "  ${BOLD}One-line install for next time:${RESET}"
+echo -e "    ${CYAN}curl -fsSL $RAW/install.sh | bash${RESET}"
 echo ""
