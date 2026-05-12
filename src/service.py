@@ -11,9 +11,10 @@ Usage:
     python3 src/service.py --daemon # background (writes PID to ~/.claude-activity/service.pid)
 
 Hook endpoints:
-    POST /event   body: {"type": "session_start"|"pre_tool_use"|"session_end"|"user_turn", ...}
+    POST /event   body: {"type": "session_start"|"pre_tool_use"|"post_tool_use"|"session_end"|"user_turn", ...}
     GET  /health  → {"status": "ok", "sessions": N}
     GET  /stats   → JSON stats for today
+    GET  /dashboard → HTML dashboard (or JSON stats if dashboard.py absent)
 
 MCP is served on stdin/stdout when --mcp flag is passed (used by claude mcp add).
 """
@@ -21,6 +22,7 @@ MCP is served on stdin/stdout when --mcp flag is passed (used by claude mcp add)
 import argparse
 import json
 import os
+import subprocess
 import sys
 import time
 import threading
@@ -66,6 +68,22 @@ class HookHandler(BaseHTTPRequestHandler):
         elif self.path.startswith("/stats"):
             stats = _db.get_stats(days=1, db_path=_DB_PATH)
             self._send(200, stats)
+        elif self.path == "/dashboard":
+            stats = _db.get_stats(days=1, db_path=_DB_PATH)
+            try:
+                from dashboard import get_dashboard_html
+                patterns = _db.get_patterns(days=7, db_path=_DB_PATH)
+                daily = _db.get_daily_breakdown(days=7, db_path=_DB_PATH)
+                files = _db.get_recent_files(limit=10, db_path=_DB_PATH)
+                html = get_dashboard_html(stats, patterns, daily, files)
+                data = html.encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html")
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+            except ImportError:
+                self._send(200, stats)
         else:
             self._send(404, {"error": "not found"})
 
@@ -99,6 +117,19 @@ def _handle_event(payload: dict):
         if session_id:
             _db.start_session(session_id, project=project, ts=ts, db_path=_DB_PATH)
             _SESSION_FILE.write_text(session_id)
+            # Detect git branch and log it as a separate event
+            git_branch = ""
+            if project:
+                try:
+                    result = subprocess.run(
+                        ["git", "-C", project, "rev-parse", "--abbrev-ref", "HEAD"],
+                        capture_output=True, text=True, timeout=3
+                    )
+                    git_branch = result.stdout.strip()
+                except Exception:
+                    git_branch = ""
+            if git_branch:
+                _db.log_event(session_id, ts, "GitBranch", git_branch, "", project, _DB_PATH)
 
     elif event_type == "pre_tool_use":
         session_id = _read_session()
@@ -115,6 +146,14 @@ def _handle_event(payload: dict):
             if ts - last_ts > 30:
                 _db.log_event(session_id, ts, "UserTurn", db_path=_DB_PATH)
             _LAST_TOOL_TS.write_text(str(ts))
+
+    elif event_type == "post_tool_use":
+        session_id = _read_session()
+        if session_id:
+            tool_name = payload.get("tool_name", "")
+            file_path = payload.get("file_path", "")
+            project = payload.get("project", os.getcwd())
+            _db.log_event(session_id, ts, "PostToolUse", tool_name, file_path, project, _DB_PATH)
 
     elif event_type == "session_end":
         session_id = _read_session()

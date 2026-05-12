@@ -12,6 +12,9 @@ triggers:
   - session summary
   - tool usage stats
   - what files did I edit
+  - vscode correlation
+  - compare with vscode
+  - plane issues
 ---
 
 # Activity Tracker Skill
@@ -94,6 +97,59 @@ _"You relied heavily on **{tool}** today — it accounted for {pct}% of all tool
 
 If total active time exceeds 120 minutes, note:
 _"Solid session — over 2 hours of focused work."_
+
+### Step 5 — VSCode correlation (when requested)
+
+If the user asks about VSCode activity, shared projects, or "compare with vscode", call `activity_vscode`:
+
+```
+tool: activity_vscode
+arguments: { "days": 7 }
+```
+
+This returns:
+- `vscode_installed` — whether VSCode/VSCodium was detected
+- `vscode_projects` — list of recently open VSCode projects
+- `shared_projects` — projects active in both Claude Code and VSCode
+
+Present results as a short summary:
+
+```
+## 💻 VSCode Correlation — last 7 days
+
+VSCode projects open: {count}
+Projects active in both Claude + VSCode: {count}
+
+Shared projects:
+  • {project}
+```
+
+If VSCode is not detected, note that it was not found on the system.
+
+### Step 6 — Plane issues (when requested)
+
+If the user asks about Plane issues, tasks, or sprints, call `activity_plane`:
+
+```
+tool: activity_plane
+arguments: {}
+```
+
+Optionally pass `workspace_url` and `api_key` if the user provides them explicitly.
+
+The tool returns either:
+- Setup instructions (if Plane is not configured) — display them as-is so the user can follow the steps
+- A list of open issues with their states — present as a simple list:
+
+```
+## ✈️ Plane Issues — {workspace}
+
+Open issues: {total}
+
+  [In Progress] Fix login redirect bug
+  [Backlog] Add dark mode
+  ...
+```
 
 ## Error Handling
 

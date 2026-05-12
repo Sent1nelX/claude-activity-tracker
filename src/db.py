@@ -3,6 +3,7 @@ SQLite database layer for Claude Code activity tracker.
 DB path: ~/.claude-activity/activity.db
 """
 
+import json
 import sqlite3
 import time
 from pathlib import Path
@@ -30,7 +31,8 @@ def init_db(db_path: str | Path = DEFAULT_DB_PATH) -> sqlite3.Connection:
             ended_at         INTEGER,
             project          TEXT    NOT NULL DEFAULT '',
             total_tools      INTEGER NOT NULL DEFAULT 0,
-            total_requests   INTEGER NOT NULL DEFAULT 0
+            total_requests   INTEGER NOT NULL DEFAULT 0,
+            git_branch       TEXT    NOT NULL DEFAULT ''
         );
 
         CREATE TABLE IF NOT EXISTS events (
@@ -49,18 +51,29 @@ def init_db(db_path: str | Path = DEFAULT_DB_PATH) -> sqlite3.Connection:
         CREATE INDEX IF NOT EXISTS idx_events_file    ON events(file_path);
     """)
     conn.commit()
+
+    # Migration: add git_branch column to existing databases that lack it.
+    existing = {
+        row[1]
+        for row in conn.execute("PRAGMA table_info(sessions)").fetchall()
+    }
+    if "git_branch" not in existing:
+        conn.execute("ALTER TABLE sessions ADD COLUMN git_branch TEXT NOT NULL DEFAULT ''")
+        conn.commit()
+
     return conn
 
 
 def start_session(session_id: str, project: str, ts: int | None = None,
+                  git_branch: str = "",
                   db_path: str | Path = DEFAULT_DB_PATH) -> None:
     """Insert a new session row."""
     ts = ts or int(time.time())
     conn = init_db(db_path)
     with conn:
         conn.execute(
-            "INSERT OR IGNORE INTO sessions (id, started_at, project) VALUES (?, ?, ?)",
-            (session_id, ts, project),
+            "INSERT OR IGNORE INTO sessions (id, started_at, project, git_branch) VALUES (?, ?, ?, ?)",
+            (session_id, ts, project, git_branch),
         )
 
 
@@ -287,3 +300,121 @@ def get_recent_files(limit: int = 10,
         {"file": r["file_path"], "edit_count": r["edit_count"], "last_edited": r["last_edited"]}
         for r in rows
     ]
+
+
+def get_daily_breakdown(days: int = 7,
+                        db_path: str | Path = DEFAULT_DB_PATH) -> list[dict]:
+    """
+    Return per-day stats for the last `days` days.
+
+    Each item: {date, sessions, tools, requests, active_minutes}
+    Date format: YYYY-MM-DD (local time).
+    """
+    since = int(time.time()) - days * 86_400
+    conn = init_db(db_path)
+
+    rows = conn.execute(
+        """SELECT
+               date(started_at, 'unixepoch', 'localtime') AS day,
+               COUNT(*)                                    AS sessions,
+               SUM(total_tools)                            AS tools,
+               SUM(total_requests)                         AS requests,
+               SUM(COALESCE(ended_at, strftime('%s','now')) - started_at) AS raw_seconds
+           FROM sessions
+           WHERE started_at >= ?
+           GROUP BY day
+           ORDER BY day""",
+        (since,),
+    ).fetchall()
+
+    return [
+        {
+            "date": r["day"],
+            "sessions": r["sessions"] or 0,
+            "tools": r["tools"] or 0,
+            "requests": r["requests"] or 0,
+            "active_minutes": round((r["raw_seconds"] or 0) / 60, 1),
+        }
+        for r in rows
+    ]
+
+
+def get_vscode_correlation(days: int = 7,
+                           db_path: str | Path = DEFAULT_DB_PATH) -> dict:
+    """
+    Cross-reference Claude projects with VSCode recently-opened workspaces.
+
+    Returns:
+        {
+            vscode_installed: bool,
+            vscode_projects: [str],   # all recent VSCode paths
+            shared_projects: [str],   # paths open in both Claude and VSCode
+        }
+    """
+    # --- Collect VSCode recent paths ---
+    vscode_paths: list[Path] = []
+    candidates = [
+        Path.home() / ".config" / "Code" / "User" / "globalStorage" / "storage.json",
+        Path.home() / ".config" / "VSCodium" / "User" / "globalStorage" / "storage.json",
+        Path.home() / ".vscode" / "storage.json",
+    ]
+    storage_file: Path | None = None
+    for c in candidates:
+        if c.exists():
+            storage_file = c
+            break
+
+    vscode_installed = storage_file is not None
+    vscode_projects: list[str] = []
+
+    if storage_file:
+        try:
+            data = json.loads(storage_file.read_text(encoding="utf-8", errors="replace"))
+            # VS Code stores recent paths under several possible keys.
+            recent: dict = data.get("history.recentlyOpenedPathsList", {})
+            if not recent:
+                # Older builds keep it at top level as a list-of-dicts.
+                recent = data.get("openedPathsList", {})
+            entries = (
+                recent.get("entries", [])
+                or recent.get("workspaces3", [])
+                or recent.get("workspaces", [])
+                or (recent if isinstance(recent, list) else [])
+            )
+            for entry in entries:
+                raw = ""
+                if isinstance(entry, str):
+                    raw = entry
+                elif isinstance(entry, dict):
+                    raw = entry.get("folderUri", "") or entry.get("workspace", {}).get("configPath", "")
+                # Strip file:// URI prefix if present.
+                if raw.startswith("file://"):
+                    raw = raw[7:]
+                if raw:
+                    vscode_projects.append(raw)
+        except Exception:
+            pass  # Malformed JSON or permission error — treat as empty.
+
+    # --- Collect Claude projects from DB ---
+    since = int(time.time()) - days * 86_400
+    conn = init_db(db_path)
+    rows = conn.execute(
+        """SELECT DISTINCT project FROM sessions
+           WHERE started_at >= ? AND project != ''""",
+        (since,),
+    ).fetchall()
+    claude_projects = {r["project"] for r in rows}
+
+    # --- Find shared projects (path prefix matching) ---
+    shared: list[str] = []
+    for vp in vscode_projects:
+        for cp in claude_projects:
+            if vp == cp or vp.startswith(cp + "/") or cp.startswith(vp + "/"):
+                shared.append(vp)
+                break
+
+    return {
+        "vscode_installed": vscode_installed,
+        "vscode_projects": vscode_projects,
+        "shared_projects": shared,
+    }

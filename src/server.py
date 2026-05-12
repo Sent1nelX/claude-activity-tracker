@@ -144,7 +144,16 @@ def tool_activity_files(limit: int = 10) -> str:
 def tool_activity_report(days: int = 7) -> str:
     stats_n = _db.get_stats(days=days, db_path=DB_PATH)
     stats_1 = _db.get_stats(days=1, db_path=DB_PATH)
-    return _fmt_report(stats_n, stats_1)
+    lines = [_fmt_report(stats_n, stats_1)]
+    try:
+        daily = _db.get_daily_breakdown(days=days, db_path=DB_PATH)
+        if daily:
+            lines.append("📅 Daily breakdown:")
+            for d in daily:
+                lines.append(f"  {d['date']}  sessions:{d['sessions']}  tools:{d['tools']}  {d['active_minutes']}min")
+    except AttributeError:
+        pass
+    return "\n".join(lines)
 
 
 def tool_activity_patterns(days: int = 7) -> str:
@@ -258,6 +267,83 @@ def tool_activity_github(project_path: str = ".", days: int = 7) -> str:
         lines.append(f"⚠️  Could not read git log: {e}")
 
     return "\n".join(lines)
+
+
+def tool_activity_vscode(days: int = 7) -> str:
+    """Correlate Claude Code sessions with VSCode activity."""
+    # Call _db.get_vscode_correlation() if it exists, otherwise return helpful message
+    try:
+        result = _db.get_vscode_correlation(days=days, db_path=DB_PATH)
+    except AttributeError:
+        return "VSCode correlation not yet available. Update to latest version."
+
+    lines = [f"💻 VSCode Correlation — last {days} days", ""]
+    if not result.get("vscode_installed"):
+        lines.append("VSCode/VSCodium not detected on this system.")
+        return "\n".join(lines)
+
+    shared = result.get("shared_projects", [])
+    vsc = result.get("vscode_projects", [])
+
+    lines.append(f"VSCode projects open: {len(vsc)}")
+    lines.append(f"Projects active in both Claude + VSCode: {len(shared)}")
+    if shared:
+        lines.append("")
+        lines.append("Shared projects:")
+        for p in shared[:10]:
+            lines.append(f"  • {p}")
+    if vsc and not shared:
+        lines.append("")
+        lines.append("VSCode projects (no Claude overlap):")
+        for p in vsc[:5]:
+            lines.append(f"  • {p}")
+    return "\n".join(lines)
+
+
+def tool_activity_plane(workspace_url: str = "", api_key: str = "") -> str:
+    """Show Plane integration status and instructions, or fetch issues if configured."""
+    config_file = Path.home() / ".claude-activity" / "config.json"
+
+    # Try to load config if no args provided
+    if not workspace_url or not api_key:
+        try:
+            import json as _json
+            cfg = _json.loads(config_file.read_text())
+            workspace_url = cfg.get("plane_workspace_url", "")
+            api_key = cfg.get("plane_api_key", "")
+        except Exception:
+            pass
+
+    if not workspace_url or not api_key:
+        return (
+            "Plane integration not configured.\n\n"
+            "To set up:\n"
+            "1. Get your API key from Plane → Settings → API Tokens\n"
+            "2. Run this to save config:\n\n"
+            "   python3 -c \"\n"
+            "   import json; from pathlib import Path\n"
+            "   cfg = {'plane_workspace_url': 'https://app.plane.so/YOUR_WORKSPACE', 'plane_api_key': 'YOUR_KEY'}\n"
+            "   (Path.home()/'.claude-activity'/'config.json').write_text(json.dumps(cfg))\n"
+            "   \"\n\n"
+            "3. Then call: activity_plane()"
+        )
+
+    # Fetch current cycle/issues from Plane API
+    import urllib.request, urllib.error, json as _json
+    try:
+        workspace_slug = workspace_url.rstrip("/").split("/")[-1]
+        url = f"https://api.plane.so/api/v1/workspaces/{workspace_slug}/issues/?per_page=10"
+        req = urllib.request.Request(url, headers={"X-Api-Key": api_key})
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = _json.loads(resp.read())
+        issues = data.get("results", [])
+        lines = [f"✈️  Plane — {workspace_slug}", f"Open issues: {data.get('total_count', len(issues))}", ""]
+        for issue in issues[:10]:
+            state = issue.get("state_detail", {}).get("name", "?")
+            lines.append(f"  [{state}] {issue.get('name', 'Untitled')}")
+        return "\n".join(lines)
+    except Exception as e:
+        return f"Plane API error: {e}\nCheck your workspace URL and API key."
 
 
 def tool_activity_export(webhook_url: str = "", days: int = 7) -> str:
@@ -378,6 +464,27 @@ TOOLS_SCHEMA = [
             },
         },
     },
+    {
+        "name": "activity_vscode",
+        "description": "Correlate Claude Code sessions with VSCode activity — shared projects and overlap.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "days": {"type": "integer", "description": "Window in days (default 7)", "default": 7}
+            },
+        },
+    },
+    {
+        "name": "activity_plane",
+        "description": "Show Plane integration status and instructions, or fetch open issues if configured.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "workspace_url": {"type": "string", "description": "Plane workspace URL (optional if saved in config)"},
+                "api_key": {"type": "string", "description": "Plane API key (optional if saved in config)"}
+            },
+        },
+    },
 ]
 
 _TOOL_DISPATCH = {
@@ -393,6 +500,11 @@ _TOOL_DISPATCH = {
     "activity_export":   lambda args: tool_activity_export(
         webhook_url=args.get("webhook_url", ""),
         days=int(args.get("days", 7)),
+    ),
+    "activity_vscode":   lambda args: tool_activity_vscode(days=int(args.get("days", 7))),
+    "activity_plane":    lambda args: tool_activity_plane(
+        workspace_url=args.get("workspace_url", ""),
+        api_key=args.get("api_key", ""),
     ),
 }
 
@@ -440,6 +552,16 @@ def _try_fastmcp() -> bool:
     def activity_export(webhook_url: str = "", days: int = 7) -> str:
         """Export activity data as JSON or POST to a webhook URL."""
         return tool_activity_export(webhook_url=webhook_url, days=days)
+
+    @mcp.tool()
+    def activity_vscode(days: int = 7) -> str:
+        """Correlate Claude Code sessions with VSCode activity."""
+        return tool_activity_vscode(days=days)
+
+    @mcp.tool()
+    def activity_plane(workspace_url: str = "", api_key: str = "") -> str:
+        """Show Plane integration status and instructions, or fetch issues if configured."""
+        return tool_activity_plane(workspace_url=workspace_url, api_key=api_key)
 
     mcp.run()
     return True  # unreachable after mcp.run() blocks, but satisfies type checker

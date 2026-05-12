@@ -61,6 +61,7 @@ _get "$PLUGIN_DIR/src/server.py"    "src/server.py"
 _get "$PLUGIN_DIR/src/db.py"        "src/db.py"
 _get "$PLUGIN_DIR/hooks/session_start.sh"  "hooks/session_start.sh"
 _get "$PLUGIN_DIR/hooks/pre_tool_use.sh"   "hooks/pre_tool_use.sh"
+_get "$PLUGIN_DIR/hooks/post_tool_use.sh"  "hooks/post_tool_use.sh"
 _get "$PLUGIN_DIR/hooks/session_end.sh"    "hooks/session_end.sh"
 
 chmod +x "$PLUGIN_DIR/hooks/"*.sh
@@ -114,6 +115,7 @@ def set_hook(event, cmd):
 
 set_hook("SessionStart", f"bash {hdir}/session_start.sh")
 set_hook("PreToolUse",   f"bash {hdir}/pre_tool_use.sh")
+set_hook("PostToolUse",  f"bash {hdir}/post_tool_use.sh")
 set_hook("Stop",         f"bash {hdir}/session_end.sh")
 
 with open(sf, "w") as f:

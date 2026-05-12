@@ -33,6 +33,8 @@ Then **restart Claude Code** and type `/activity`.
 - **Tool usage analytics** — see which MCP tools and Claude Code built-ins you reach for most
 - **File edit heatmap** — discover which files you iterate on most across sessions
 - **GitHub correlation** — compare AI sessions against actual git commits
+- **VSCode correlation** — see which projects are active in both Claude Code and VSCode simultaneously
+- **Plane integration** — fetch open issues from your Plane workspace alongside session data
 - **Peak hour analysis** — discover when you're most productive
 - **Daily & weekly reports** — instant summaries via the `/activity` skill command
 - **MCP-native** — exposes metrics through a local MCP server so Claude can reason about your data
@@ -104,8 +106,10 @@ The plugin registers an `activity-tracker` MCP server with tools you can call di
 | `activity_files` | Most-edited files ranked by edit count |
 | `activity_patterns` | Peak hours, day-of-week heatmap, task type breakdown |
 | `activity_github` | Correlate AI sessions with git commits (efficiency ratio) |
-| `activity_report` | Multi-day report (default: 7 days). Accepts `{ "days": N }` |
+| `activity_report` | Multi-day report with daily breakdown (default: 7 days). Accepts `{ "days": N }` |
 | `activity_export` | Export data as JSON or POST to a webhook |
+| `activity_vscode` | Correlate Claude Code sessions with VSCode activity — shared projects and overlap |
+| `activity_plane` | Fetch open issues from a Plane workspace, or show setup instructions |
 
 ---
 
@@ -170,11 +174,33 @@ python3 ~/.claude-activity/src/service.py --daemon
 
 ---
 
+## Plane Setup
+
+To connect your Plane workspace:
+
+1. Get your API key from **Plane → Settings → API Tokens**
+2. Save your config:
+
+```python
+import json
+from pathlib import Path
+
+cfg = {
+    "plane_workspace_url": "https://app.plane.so/YOUR_WORKSPACE",
+    "plane_api_key": "YOUR_KEY"
+}
+(Path.home() / ".claude-activity" / "config.json").write_text(json.dumps(cfg))
+```
+
+3. Call `activity_plane` — it will fetch your open issues automatically.
+
+---
+
 ## Roadmap
 
-- [ ] **Plane integration** — link sessions to Plane issues and sprints
+- [x] **VSCode correlation** — detect shared projects across Claude Code and VSCode sessions
+- [x] **Plane integration** — link sessions to Plane issues and sprints
 - [ ] **Web dashboard** — local FastAPI + React view with charts
-- [ ] **VSCode extension** — sidebar panel with live metrics
 - [ ] **Team aggregation** — opt-in anonymized team stats
 - [ ] **Goal tracking** — daily coding time targets with progress bars
 
@@ -182,14 +208,22 @@ python3 ~/.claude-activity/src/service.py --daemon
 
 ## Contributing
 
-Pull requests are welcome. For significant changes, please open an issue first.
+Contributions are welcome. For significant changes, please open an issue first to discuss what you'd like to change.
 
 ```bash
 # Development setup
 git clone https://github.com/Sent1nelX/claude-activity-tracker.git
 cd claude-activity-tracker
 pip3 install -r requirements.txt
+
+# Run tests
+python3 -m pytest tests/
+
+# Run the server locally
+python3 src/server.py
 ```
+
+Please make sure your changes include tests where applicable and keep individual files under 500 lines.
 
 ---
 
