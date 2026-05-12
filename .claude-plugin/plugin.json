@@ -1,7 +1,7 @@
 {
   "name": "claude-activity-tracker",
-  "version": "2.0.0",
-  "description": "Track your Claude Code session activity — sessions, tool calls, files edited, GitHub correlation, VSCode overlap, and Plane integration. All data stays local.",
+  "version": "2.1.0",
+  "description": "Automatically tracks your Claude Code activity — sessions, tool calls, files edited, active time, peak hours, and GitHub/VSCode/Plane correlation. All data stays local in SQLite. Adds 9 MCP tools and a web dashboard.",
   "author": {
     "name": "Sent1nelX",
     "url": "https://github.com/Sent1nelX"
@@ -9,6 +9,5 @@
   "homepage": "https://github.com/Sent1nelX/claude-activity-tracker",
   "repository": "https://github.com/Sent1nelX/claude-activity-tracker",
   "license": "MIT",
-  "keywords": ["activity", "tracking", "analytics", "sessions", "productivity", "github", "plane", "vscode"],
-  "category": "productivity"
+  "keywords": ["activity", "tracking", "analytics", "sessions", "productivity", "github", "plane", "vscode", "dashboard", "mcp"]
 }

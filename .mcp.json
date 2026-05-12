@@ -2,7 +2,7 @@
   "mcpServers": {
     "activity-tracker": {
       "command": "python3",
-      "args": ["${CLAUDE_PLUGIN_ROOT}/src/service.py", "--mcp"]
+      "args": ["${HOME}/.claude-activity/src/service.py", "--mcp"]
     }
   }
 }
